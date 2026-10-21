@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Where is the Log?</title>
+    <!-- Tailwind CSS for modern UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Fredoka One / Poppins for arcade feel -->
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            user-select: none;
+            overflow: hidden;
+        }
+        .arcade-font {
+            font-family: 'Fredoka One', cursive;
+        }
+        /* Custom scrollbars / pan grab cursor */
+        .pannable-container {
+            cursor: grab;
+        }
+        .pannable-container:active {
+            cursor: grabbing;
+        }
+        @keyframes bounce-subtle {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+        .animate-bounce-subtle {
+            animation: bounce-subtle 2s infinite ease-in-out;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 15px rgba(34, 197, 94, 0.6); }
+            50% { box-shadow: 0 0 30px rgba(34, 197, 94, 0.9); }
+        }
+        .glow-effect {
+            animation: pulse-glow 1.5s infinite;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-6px); }
+            40%, 80% { transform: translateX(6px); }
+        }
+        .animate-shake {
+            animation: shake 0.4s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white h-screen w-screen flex flex-col justify-between relative">
+
+    <!-- Audio Synthesizer Handler -->
+    <script>
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.muted = false;
+            }
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+            playClick() {
+                if (this.muted) return;
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+            playWrong() {
+                if (this.muted) return;
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(90, this.ctx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.2);
+            }
+            playSuccess() {
+                if (this.muted) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                notes.forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+                    gain.gain.setValueAtTime(0.2, now + idx * 0.1);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.1 + 0.3);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now + idx * 0.1);
+                    osc.stop(now + idx * 0.1 + 0.3);
+                });
+            }
+        }
+        const sfx = new SoundFX();
+    </script>
+
+    <!-- TOP HUD / HEADER -->
+    <header id="hud-header" class="hidden bg-slate-800/90 backdrop-blur border-b border-slate-700 px-6 py-3 flex justify-between items-center z-30 shadow-lg">
+        <div class="flex items-center space-x-4">
+            <button onclick="returnToMenu()" class="bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded-xl font-bold text-sm shadow-md transition transform active:scale-95 flex items-center space-x-1">
+                <span>🏠</span> <span>Menu</span>
+            </button>
+            <div>
+                <h2 id="hud-level-title" class="arcade-font text-amber-400 text-lg tracking-wide">Level 1</h2>
+                <p class="text-xs text-slate-300">Find the hidden wooden log in the crowd!</p>
+            </div>
+        </div>
+
+        <!-- Target Log Thumbnail -->
+        <div class="flex items-center space-x-3 bg-slate-900/60 border border-slate-700 px-4 py-1.5 rounded-2xl shadow-inner">
+            <div id="hud-luigi-icon" class="w-10 h-10 flex items-center justify-center bg-amber-900/40 rounded-xl border border-amber-600">
+                <!-- Dynamic Log Mini Icon -->
+            </div>
+            <div class="text-left">
+                <span class="text-[10px] uppercase font-bold text-amber-400 tracking-wider block">Target</span>
+                <span id="hud-luigi-desc" class="text-xs font-semibold text-white">Classic Log</span>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-6">
+            <div class="text-right">
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">Time</span>
+                <span id="hud-timer" class="arcade-font text-xl text-cyan-400">00:00</span>
+            </div>
+            <div class="text-right">
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">Score</span>
+                <span id="hud-score" class="arcade-font text-xl text-yellow-400">1000</span>
+            </div>
+            <button onclick="toggleSound()" id="sound-toggle-btn" class="bg-slate-700 hover:bg-slate-600 p-2 rounded-xl text-lg transition">🔊</button>
+        </div>
+    </header>
+
+    <!-- MAIN APP CONTAINER -->
+    <main class="flex-1 relative overflow-hidden flex flex-col justify-center items-center">
+
+        <!-- 1. MAIN MENU SCREEN -->
+        <div id="screen-menu" class="absolute inset-0 bg-gradient-to-br from-amber-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center p-6 z-20 overflow-y-auto">
+            <div class="text-center max-w-2xl mx-auto space-y-6">
+                <div class="inline-block bg-amber-600/20 border border-amber-500/40 px-6 py-2 rounded-full text-amber-400 font-bold text-sm mb-2 animate-bounce-subtle">
+                    🪵 Mushroom Kingdom Hidden Log Search
+                </div>
+                <h1 class="arcade-font text-5xl md:text-7xl text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-orange-300 to-emerald-400 drop-shadow-lg">
+                    WHERE'S THE LOG?
+                </h1>
+                <p class="text-slate-300 text-base md:text-lg max-w-lg mx-auto">
+                    The green man has transformed into a wooden log! Pan around the massive scenes, zoom in, and spot the hidden log in the crowd before time runs out.
+                </p>
+
+                <!-- Level Selector Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 w-full max-w-3xl">
+                    <!-- Level 1 -->
+                    <div onclick="startLevel(0)" class="bg-slate-800/80 hover:bg-slate-750 border-2 border-amber-500/50 hover:border-amber-400 rounded-3xl p-5 text-left cursor-pointer transition transform hover:-translate-y-1 shadow-xl group">
+                        <div class="flex justify-between items-start mb-3">
+                            <span class="bg-amber-500/20 text-amber-300 text-xs font-bold px-2.5 py-1 rounded-lg">Level 1</span>
+                            <span class="text-2xl group-hover:scale-125 transition">🪵</span>
+                        </div>
+                        <h3 class="arcade-font text-lg text-white mb-1">Bowser's Castle</h3>
+                        <p class="text-xs text-slate-400 mb-3">Courtyard packed with Goombas, Koopas & Toads.</p>
+                        <span class="text-xs font-bold text-amber-400 flex items-center space-x-1"><span>Play Now</span> <span>→</span></span>
+                    </div>
+
+                    <!-- Level 2 -->
+                    <div onclick="startLevel(1)" class="bg-slate-800/80 hover:bg-slate-750 border-2 border-emerald-500/50 hover:border-emerald-400 rounded-3xl p-5 text-left cursor-pointer transition transform hover:-translate-y-1 shadow-xl group">
+                        <div class="flex justify-between items-start mb-3">
+                            <span class="bg-emerald-500/20 text-emerald-300 text-xs font-bold px-2.5 py-1 rounded-lg">Level 2</span>
+                            <span class="text-2xl group-hover:scale-125 transition">🎉</span>
+                        </div>
+                        <h3 class="arcade-font text-lg text-white mb-1">Toad Town Market</h3>
+                        <p class="text-xs text-slate-400 mb-3">Busy bazaar filled with Yoshis, Coins & Party Logs.</p>
+                        <span class="text-xs font-bold text-emerald-400 flex items-center space-x-1"><span>Play Now</span> <span>→</span></span>
+                    </div>
+
+                    <!-- Level 3 -->
+                    <div onclick="startLevel(2)" class="bg-slate-800/80 hover:bg-slate-750 border-2 border-cyan-500/50 hover:border-cyan-400 rounded-3xl p-5 text-left cursor-pointer transition transform hover:-translate-y-1 shadow-xl group">
+                        <div class="flex justify-between items-start mb-3">
+                            <span class="bg-cyan-500/20 text-cyan-300 text-xs font-bold px-2.5 py-1 rounded-lg">Level 3</span>
+                            <span class="text-2xl group-hover:scale-125 transition">🚀</span>
+                        </div>
+                        <h3 class="arcade-font text-lg text-white mb-1">Galaxy Observatory</h3>
+                        <p class="text-xs text-slate-400 mb-3">Starlit cosmos packed with Astro Logs & Lumas.</p>
+                        <span class="text-xs font-bold text-cyan-400 flex items-center space-x-1"><span>Play Now</span> <span>→</span></span>
+                    </div>
+                </div>
+
+                <!-- How to play toggle/footer -->
+                <div class="pt-4 text-xs text-slate-400 flex justify-center space-x-6">
+                    <span class="flex items-center space-x-1"><span>🖱️</span> <span>Click & Drag to Pan</span></span>
+                    <span class="flex items-center space-x-1"><span>🔍</span> <span>Zoom buttons or Scroll</span></span>
+                    <span class="flex items-center space-x-1"><span>⏱️</span> <span>Beat your best score!</span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. GAMEPLAY PAN/ZOOM VIEWPORT -->
+        <div id="screen-game" class="absolute inset-0 overflow-hidden pannable-container hidden bg-slate-950">
+            <!-- Zoomable & Pannable World Map Container -->
+            <div id="world-map" class="absolute top-0 left-0 transition-transform duration-75 origin-top-left" style="width: 2400px; height: 1800px;">
+                <!-- SVG/DOM Generated Background Scenery & Characters injected via JS -->
+                <div id="map-scene-content" class="relative w-full h-full"></div>
+            </div>
+
+            <!-- Floating Zoom Controls & Minimap HUD on Bottom Right -->
+            <div class="absolute bottom-6 right-6 flex flex-col space-y-2 z-30">
+                <button onclick="zoomIn()" class="bg-slate-800/90 hover:bg-slate-700 text-white w-12 h-12 rounded-2xl shadow-xl flex items-center justify-center text-xl font-bold border border-slate-600 transition active:scale-95">+</button>
+                <button onclick="zoomOut()" class="bg-slate-800/90 hover:bg-slate-700 text-white w-12 h-12 rounded-2xl shadow-xl flex items-center justify-center text-xl font-bold border border-slate-600 transition active:scale-95">-</button>
+                <button onclick="resetZoom()" class="bg-slate-800/90 hover:bg-slate-700 text-white w-12 h-12 rounded-2xl shadow-xl flex items-center justify-center text-xs font-bold border border-slate-600 transition active:scale-95">Reset</button>
+            </div>
+
+            <!-- Hint Button -->
+            <div class="absolute bottom-6 left-6 z-30">
+                <button onclick="useHint()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 px-5 py-3 rounded-2xl shadow-xl font-bold flex items-center space-x-2 transition transform active:scale-95 border border-amber-300">
+                    <span>💡</span> <span>Hint (-200 pts)</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 3. VICTORY / LEVEL COMPLETE MODAL -->
+        <div id="screen-victory" class="absolute inset-0 bg-slate-950/80 backdrop-blur-md hidden flex items-center justify-center p-6 z-40">
+            <div class="bg-slate-900 border-2 border-amber-500/60 rounded-3xl p-8 max-w-md w-full text-center space-y-6 shadow-2xl animate-bounce-subtle">
+                <div class="inline-block bg-amber-500/20 p-4 rounded-3xl text-4xl mb-1">🪵</div>
+                <h2 class="arcade-font text-3xl text-amber-400">LOG FOUND!</h2>
+                <p id="victory-msg" class="text-slate-300 text-sm">Amazing job spotting the hidden log in the crowd!</p>
+
+                <div class="bg-slate-800/90 rounded-2xl p-4 grid grid-cols-2 gap-4 border border-slate-700">
+                    <div>
+                        <span class="text-[10px] text-slate-400 uppercase font-bold block">Time Taken</span>
+                        <span id="vic-time" class="arcade-font text-xl text-cyan-400">00:35</span>
+                    </div>
+                    <div>
+                        <span class="text-[10px] text-slate-400 uppercase font-bold block">Final Score</span>
+                        <span id="vic-score" class="arcade-font text-xl text-yellow-400">850</span>
+                    </div>
+                </div>
+
+                <div class="flex space-x-3 pt-2">
+                    <button onclick="returnToMenu()" class="flex-1 bg-slate-800 hover:bg-slate-750 text-white py-3 rounded-2xl font-bold text-sm transition border border-slate-700">Main Menu</button>
+                    <button id="next-level-btn" onclick="nextLevel()" class="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-2xl font-bold text-sm shadow-lg transition">Next Level →</button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- GAME LOGIC SCRIPT -->
+    <script>
+        // Game State Variables
+        let currentLevelIndex = 0;
+        let score = 1000;
+        let timerSeconds = 0;
+        let timerInterval = null;
+        let gameActive = false;
+        let logPosition = { x: 0, y: 0 }; // percentage 0-100 on map
+        let hintUsed = false;
+
+        // Pan and Zoom variables
+        let scale = 1;
+        let panX = 0;
+        let panY = 0;
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+
+        // Level Configurations
+        const levels = [
+            {
+                id: 0,
+                title: "Level 1: Bowser's Castle Courtyard",
+                desc: "Classic Forest Log",
+                bgGradient: "from-stone-900 via-rose-950 to-stone-900",
+                width: 2400,
+                height: 1800,
+                logType: 'classic',
+                crowdCount: 140
+            },
+            {
+                id: 1,
+                title: "Level 2: Toad Town Market",
+                desc: "Party Log with Hat",
+                bgGradient: "from-amber-950 via-emerald-950 to-slate-900",
+                width: 2600,
+                height: 1900,
+                logType: 'party',
+                crowdCount: 160
+            },
+            {
+                id: 2,
+                title: "Level 3: Starry Galaxy Observatory",
+                desc: "Astro Spacesuit Log",
+                bgGradient: "from-indigo-950 via-purple-950 to-slate-950",
+                width: 2800,
+                height: 2000,
+                logType: 'space',
+                crowdCount: 180
+            }
+        ];
+
+        // Toggle Sound Mute
+        function toggleSound() {
+            sfx.muted = !sfx.muted;
+            document.getElementById('sound-toggle-btn').innerText = sfx.muted ? '🔇' : '🔊';
+        }
+
+        // Start Level
+        function startLevel(index) {
+            sfx.playClick();
+            currentLevelIndex = index;
+            const lvl = levels[index];
+
+            // Reset UI
+            document.getElementById('screen-menu').classList.add('hidden');
+            document.getElementById('screen-victory').classList.add('hidden');
+            document.getElementById('hud-header').classList.remove('hidden');
+            document.getElementById('screen-game').classList.remove('hidden');
+
+            document.getElementById('hud-level-title').innerText = lvl.title;
+            
+            // Set Log Icon Thumbnail
+            const iconContainer = document.getElementById('hud-luigi-icon');
+            iconContainer.innerHTML = getLogMiniSVG(lvl.logType);
+            document.getElementById('hud-luigi-desc').innerText = lvl.desc;
+
+            // Reset Game Stats
+            score = 1000;
+            timerSeconds = 0;
+            gameActive = true;
+            hintUsed = false;
+            updateHUD();
+
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (gameActive) {
+                    timerSeconds++;
+                    // Deduct small score penalty over time
+                    if (timerSeconds % 5 === 0 && score > 100) score -= 10;
+                    updateHUD();
+                }
+            }, 1000);
+
+            // Generate Map Content
+            generateScene(lvl);
+
+            // Center initial view
+            centerMap();
+        }
+
+        function updateHUD() {
+            const mins = String(Math.floor(timerSeconds / 60)).padStart(2, '0');
+            const secs = String(timerSeconds % 60).padStart(2, '0');
+            document.getElementById('hud-timer').innerText = `${mins}:${secs}`;
+            document.getElementById('hud-score').innerText = score;
+        }
+
+        function returnToMenu() {
+            sfx.playClick();
+            gameActive = false;
+            if (timerInterval) clearInterval(timerInterval);
+            document.getElementById('hud-header').classList.add('hidden');
+            document.getElementById('screen-game').classList.add('hidden');
+            document.getElementById('screen-victory').classList.add('hidden');
+            document.getElementById('screen-menu').classList.remove('hidden');
+        }
+
+        // Pan and Zoom setup
+        const gameScreen = document.getElementById('screen-game');
+        const worldMap = document.getElementById('world-map');
+
+        gameScreen.addEventListener('mousedown', (e) => {
+            if (e.target.closest('#hint-btn') || e.target.closest('button')) return;
+            isDragging = true;
+            startX = e.clientX - panX;
+            startY = e.clientY - panY;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging || !gameActive) return;
+            panX = e.clientX - startX;
+            panY = e.clientY - startY;
+            constrainPan();
+            updateTransform();
+        });
+
+        window.addEventListener('mouseup', () => { isDragging = false; });
+
+        // Touch support for mobile panning
+        gameScreen.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                startX = e.touches[0].clientX - panX;
+                startY = e.touches[0].clientY - panY;
+            }
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            if (!isDragging || !gameActive || e.touches.length !== 1) return;
+            panX = e.touches[0].clientX - startX;
+            panY = e.touches[0].clientY - startY;
+            constrainPan();
+            updateTransform();
+        });
+
+        window.addEventListener('touchend', () => { isDragging = false; });
+
+        // Wheel zoom
+        gameScreen.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomIntensity = 0.1;
+            if (e.deltaY < 0) {
+                scale = Math.min(scale + zoomIntensity, 2.5);
+            } else {
+                scale = Math.max(scale - zoomIntensity, 0.5);
+            }
+            constrainPan();
+            updateTransform();
+        }, { passive: false });
+
+        function zoomIn() { sfx.playClick(); scale = Math.min(scale + 0.3, 2.5); constrainPan(); updateTransform(); }
+        function zoomOut() { sfx.playClick(); scale = Math.max(scale - 0.3, 0.5); constrainPan(); updateTransform(); }
+        function resetZoom() { sfx.playClick(); scale = 1; centerMap(); }
+
+        function centerMap() {
+            const lvl = levels[currentLevelIndex];
+            panX = (window.innerWidth - lvl.width * scale) / 2;
+            panY = (window.innerHeight - lvl.height * scale) / 2;
+            constrainPan();
+            updateTransform();
+        }
+
+        function constrainPan() {
+            const lvl = levels[currentLevelIndex];
+            const currentW = lvl.width * scale;
+            const currentH = lvl.height * scale;
+            
+            if (currentW > window.innerWidth) {
+                panX = Math.min(0, Math.max(panX, window.innerWidth - currentW));
+            } else {
+                panX = (window.innerWidth - currentW) / 2;
+            }
+
+            if (currentH > window.innerHeight) {
+                panY = Math.min(0, Math.max(panY, window.innerHeight - currentH));
+            } else {
+                panY = (window.innerHeight - currentH) / 2;
+            }
+        }
+
+        function updateTransform() {
+            worldMap.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        }
+
+        // Generate Procedural Detailed Scene with Distractions and Target Log
+        function generateScene(lvl) {
+            const container = document.getElementById('map-scene-content');
+            container.innerHTML = '';
+            container.className = `relative w-full h-full bg-gradient-to-br ${lvl.bgGradient}`;
+
+            // Add background decorative environment elements (castles, tents, stars, terrain)
+            let bgHTML = '';
+            for (let i = 0; i < 25; i++) {
+                const rx = Math.random() * (lvl.width - 200);
+                const ry = Math.random() * (lvl.height - 200);
+                bgHTML += `<div class="absolute opacity-15 pointer-events-none" style="left: ${rx}px; top: ${ry}px; font-size: ${Math.random() * 40 + 30}px;">${getBgProp(lvl.id)}</div>`;
+            }
+
+            // Pick random location for Log (avoiding extreme edges)
+            const logX = Math.floor(Math.random() * (lvl.width - 300) + 150);
+            const logY = Math.floor(Math.random() * (lvl.height - 300) + 150);
+            logPosition = { x: logX, y: logY };
+
+            // Generate crowd characters (Toads, Yoshis, Goombas, Koopas, Stars, Mushrooms)
+            let crowdHTML = '';
+            const crowdTypes = ['toad_red', 'toad_blue', 'yoshi', 'goomba', 'koopas', 'star', 'mushroom'];
+
+            for (let i = 0; i < lvl.crowdCount; i++) {
+                const cx = Math.random() * (lvl.width - 100);
+                const cy = Math.random() * (lvl.height - 100);
+                const type = crowdTypes[Math.floor(Math.random() * crowdTypes.length)];
+                crowdHTML += `<div class="absolute cursor-pointer transition transform hover:scale-110 active:scale-95" style="left: ${cx}px; top: ${cy}px; width: 60px; height: 70px;" onclick="checkClick(event, ${cx}, ${cy}, false)">
+                    ${getCharacterSVG(type)}
+                </div>`;
+            }
+
+            // Insert Log into the DOM with a unique click handler
+            const logHTML = `<div id="log-target-element" class="absolute cursor-pointer transition transform hover:scale-110 active:scale-95 z-10" style="left: ${logX}px; top: ${logY}px; width: 70px; height: 80px;" onclick="checkClick(event, ${logX}, ${logY}, true)">
+                ${getLogSVG(lvl.logType)}
+            </div>`;
+
+            container.innerHTML = bgHTML + crowdHTML + logHTML;
+        }
+
+        function getBgProp(levelId) {
+            if (levelId === 0) return ['🏰', '🔥', '🧱', '⛓️'][Math.floor(Math.random() * 4)];
+            if (levelId === 1) return ['🍄', '🌸', '🪙', '🌳'][Math.floor(Math.random() * 4)];
+            return ['✨', '🪐', '⭐', '🌌'][Math.floor(Math.random() * 4)];
+        }
+
+        // SVG Graphics Generators for Log
+        function getLogMiniSVG(type) {
+            if (type === 'party') {
+                return `<svg viewBox="0 0 40 40" class="w-8 h-8 drop-shadow"><rect x="10" y="8" width="20" height="26" rx="4" fill="#78350f"/><ellipse cx="20" cy="8" rx="10" ry="4" fill="#d97706"/><polygon points="20,1 25,7 15,7" fill="#ef4444"/><circle cx="16" cy="18" r="2" fill="#000"/><circle cx="24" cy="18" r="2" fill="#000"/></svg>`;
+            } else if (type === 'space') {
+                return `<svg viewBox="0 0 40 40" class="w-8 h-8 drop-shadow"><rect x="10" y="10" width="20" height="24" rx="4" fill="#78350f"/><circle cx="20" cy="16" r="12" fill="#0284c7" opacity="0.4"/><ellipse cx="20" cy="10" rx="10" ry="4" fill="#d97706"/><circle cx="16" cy="18" r="2" fill="#fff"/><circle cx="24" cy="18" r="2" fill="#fff"/></svg>`;
+            } else {
+                return `<svg viewBox="0 0 40 40" class="w-8 h-8 drop-shadow"><rect x="10" y="8" width="20" height="26" rx="4" fill="#78350f"/><ellipse cx="20" cy="8" rx="10" ry="4" fill="#d97706"/><path d="M 6 20 Q 10 16 12 20 Z" fill="#22c55e"/><circle cx="16" cy="18" r="2" fill="#000"/><circle cx="24" cy="18" r="2" fill="#000"/></svg>`;
+            }
+        }
+
+        function getLogSVG(type) {
+            let accessories = '';
+            
+            if (type === 'party') {
+                accessories = `
+                    <!-- Party Hat -->
+                    <polygon points="35,2 48,22 22,22" fill="#f59e0b" />
+                    <polygon points="35,2 48,22 35,22" fill="#d97706" />
+                    <circle cx="35" cy="2" r="3.5" fill="#ef4444" />
+                    <circle cx="28" cy="18" r="2" fill="#3b82f6" />
+                    <circle cx="38" cy="14" r="2" fill="#22c55e" />
+                `;
+            } else if (type === 'space') {
+                accessories = `
+                    <!-- Astronaut Glass Helmet -->
+                    <circle cx="35" cy="30" r="24" fill="#38bdf8" fill-opacity="0.25" stroke="#0284c7" stroke-width="2.5" />
+                    <ellipse cx="27" cy="20" rx="6" ry="3" fill="#ffffff" fill-opacity="0.5" transform="rotate(-20 27 20)" />
+                    <!-- Oxygen Pack side tubes -->
+                    <rect x="5" y="38" width="6" height="22" rx="3" fill="#94a3b8" />
+                    <rect x="59" y="38" width="6" height="22" rx="3" fill="#94a3b8" />
+                `;
+            } else {
+                accessories = `
+                    <!-- Classic Leaf / Moss Sprout -->
+                    <path d="M 12 32 Q 2 24 14 20 Q 18 28 12 32 Z" fill="#22c55e" stroke="#15803d" stroke-width="1.5" />
+                    <path d="M 14 20 Q 22 12 26 22 Q 20 26 14 20 Z" fill="#4ade80" stroke="#15803d" stroke-width="1.5" />
+                `;
+            }
+
+            return `<svg viewBox="0 0 70 80" class="w-full h-full drop-shadow-xl animate-bounce-subtle">
+                ${accessories}
+                
+                <!-- Main Wooden Log Body -->
+                <rect x="16" y="22" width="38" height="52" rx="8" fill="#78350f" stroke="#451a03" stroke-width="3"/>
+                
+                <!-- Bark Texture Lines -->
+                <path d="M 23 32 L 23 68" stroke="#451a03" stroke-width="2" stroke-dasharray="6 4" stroke-linecap="round"/>
+                <path d="M 35 44 L 35 70" stroke="#451a03" stroke-width="2" stroke-dasharray="8 3" stroke-linecap="round"/>
+                <path d="M 47 30 L 47 64" stroke="#451a03" stroke-width="2" stroke-dasharray="5 5" stroke-linecap="round"/>
+                
+                <!-- Top Tree Rings (Cross section) -->
+                <ellipse cx="35" cy="22" rx="19" ry="8" fill="#d97706" stroke="#451a03" stroke-width="3"/>
+                <ellipse cx="35" cy="22" rx="13" ry="5.5" fill="none" stroke="#b45309" stroke-width="1.8"/>
+                <ellipse cx="35" cy="22" rx="7" ry="3" fill="none" stroke="#92400e" stroke-width="1.5"/>
+                <circle cx="35" cy="22" r="1.5" fill="#451a03"/>
+                
+                <!-- Cute Googly Eyes -->
+                <circle cx="28" cy="38" r="5" fill="#ffffff" stroke="#451a03" stroke-width="1"/>
+                <circle cx="42" cy="38" r="5" fill="#ffffff" stroke="#451a03" stroke-width="1"/>
+                <circle cx="29.5" cy="38" r="2.5" fill="#000000"/>
+                <circle cx="43.5" cy="38" r="2.5" fill="#000000"/>
+                
+                <!-- Cheerful Smile -->
+                <path d="M 30 46 Q 35 51 40 46" fill="none" stroke="#451a03" stroke-width="2.5" stroke-linecap="round"/>
+
+                <!-- Wood Knot Detail -->
+                <circle cx="45" cy="56" r="3.5" fill="none" stroke="#451a03" stroke-width="1.5" />
+                <circle cx="45" cy="56" r="1" fill="#451a03" />
+            </svg>`;
+        }
+
+        function getCharacterSVG(type) {
+            switch(type) {
+                case 'toad_red':
+                    return `<svg viewBox="0 0 60 70" class="w-full h-full drop-shadow"><circle cx="30" cy="24" r="18" fill="#ffffff"/><circle cx="18" cy="18" r="7" fill="#dc2626"/><circle cx="42" cy="18" r="7" fill="#dc2626"/><circle cx="30" cy="10" r="6" fill="#dc2626"/><rect x="22" y="38" width="16" height="22" rx="4" fill="#2563eb"/><rect x="18" y="42" width="24" height="8" rx="2" fill="#ffffff"/></svg>`;
+                case 'toad_blue':
+                    return `<svg viewBox="0 0 60 70" class="w-full h-full drop-shadow"><circle cx="30" cy="24" r="18" fill="#ffffff"/><circle cx="18" cy="18" r="7" fill="#2563eb"/><circle cx="42" cy="18" r="7" fill="#2563eb"/><circle cx="30" cy="10" r="6" fill="#2563eb"/><rect x="22" y="38" width="16" height="22" rx="4" fill="#dc2626"/><rect x="18" y="42" width="24" height="8" rx="2" fill="#ffffff"/></svg>`;
+                case 'yoshi':
+                    return `<svg viewBox="0 0 60 70" class="w-full h-full drop-shadow"><ellipse cx="30" cy="35" rx="16" ry="18" fill="#22c55e"/><path d="M 15 20 Q 30 5 40 25 Z" fill="#ef4444"/><ellipse cx="32" cy="42" rx="10" ry="12" fill="#fef08a"/></svg>`;
+                case 'goomba':
+                    return `<svg viewBox="0 0 60 70" class="w-full h-full drop-shadow"><ellipse cx="30" cy="36" rx="20" ry="18" fill="#b45309"/><ellipse cx="30" cy="46" rx="16" ry="8" fill="#fef08a"/><rect x="20" y="52" width="8" height="12" rx="3" fill="#78350f"/><rect x="32" y="52" width="8" height="12" rx="3" fill="#78350f"/></svg>`;
+                case 'koopas':
+                    return `<svg viewBox="0 0 60 70" class="w-full h-full drop-shadow"><ellipse cx="30" cy="40" rx="16" ry="14" fill="#16a34a"/><circle cx="30" cy="24" r="10" fill="#fef08a"/><path d="M 22 18 Q 30 10 38 18 Z" fill="#dc2626"/></svg>`;
+                case 'star':
+                    return `<svg viewBox="0 0 60 70" class="w-full h-full drop-shadow"><polygon points="30,10 37,25 54,27 42,39 45,55 30,47 15,55 18,39 6,27 23,25" fill="#facc15"/></svg>`;
+                default:
+                    return `<svg viewBox="0 0 60 70" class="w-full h-full drop-shadow"><circle cx="30" cy="35" r="16" fill="#dc2626"/><circle cx="30" cy="35" r="10" fill="#ffffff"/><circle cx="30" cy="35" r="4" fill="#dc2626"/></svg>`;
+            }
+        }
+
+        // Check Click Interaction
+        function checkClick(event, x, y, isLog) {
+            if (!gameActive) return;
+            event.stopPropagation();
+
+            if (isLog) {
+                // Success! Log found!
+                gameActive = false;
+                if (timerInterval) clearInterval(timerInterval);
+                sfx.playSuccess();
+
+                // Highlight Log
+                const targetEl = document.getElementById('log-target-element');
+                targetEl.classList.add('glow-effect', 'scale-125');
+
+                // Show Victory Modal after short delay
+                setTimeout(() => {
+                    document.getElementById('vic-time').innerText = document.getElementById('hud-timer').innerText;
+                    document.getElementById('vic-score').innerText = score;
+
+                    // If final level, update next level button
+                    const nextBtn = document.getElementById('next-level-btn');
+                    if (currentLevelIndex >= levels.length - 1) {
+                        nextBtn.innerText = "Completed All!";
+                        nextBtn.onclick = returnToMenu;
+                    } else {
+                        nextBtn.innerText = "Next Level →";
+                        nextBtn.onclick = nextLevel;
+                    }
+
+                    document.getElementById('screen-victory').classList.remove('hidden');
+                }, 800);
+
+            } else {
+                // Wrong click penalty
+                sfx.playWrong();
+                score = Math.max(0, score - 50);
+                updateHUD();
+
+                // Visual shake feedback on target element clicked
+                const el = event.currentTarget;
+                el.classList.add('animate-shake');
+                setTimeout(() => el.classList.remove('animate-shake'), 400);
+            }
+        }
+
+        // Hint Mechanic
+        function useHint() {
+            if (!gameActive || hintUsed) return;
+            sfx.playClick();
+            hintUsed = true;
+            score = Math.max(0, score - 200);
+            updateHUD();
+
+            // Pan and zoom smoothly toward the Log
+            scale = 1.8;
+            const lvl = levels[currentLevelIndex];
+            panX = -(logPosition.x * scale - window.innerWidth / 2);
+            panY = -(logPosition.y * scale - window.innerHeight / 2);
+            constrainPan();
+            updateTransform();
+
+            // Pulse Log element briefly
+            const targetEl = document.getElementById('log-target-element');
+            targetEl.classList.add('glow-effect');
+            setTimeout(() => targetEl.classList.remove('glow-effect'), 2500);
+        }
+
+        function nextLevel() {
+            if (currentLevelIndex < levels.length - 1) {
+                startLevel(currentLevelIndex + 1);
+            } else {
+                returnToMenu();
+            }
+        }
+    </script>
+</body>
+</html>
